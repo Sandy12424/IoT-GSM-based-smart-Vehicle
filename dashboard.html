@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IoT-4G Smart Vehicle — Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="floor-plan.js"></script>
+<style>
+  :root{
+    --bg:#0f1417; --panel:#171e23; --panel2:#1c252b; --line:#2a333a;
+    --text:#e7edf0; --dim:#7c8992; --mdim:#5b6b74;
+    --green:#33d17a; --amber:#e8a33d; --red:#e4574c; --blue:#4d8fe0; --purple:#a682e8;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 26px; border-bottom:1px solid var(--line); background:var(--panel);
+  }
+  .topbar h1{ font-size:16px; margin:0; font-weight:600; }
+  .who{ display:flex; align-items:center; gap:14px; font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--dim); }
+  .role-badge{ padding:3px 9px; border-radius:5px; font-size:11px; font-weight:600; letter-spacing:0.3px; }
+  .role-badge.admin{ background:#a682e830; color:var(--purple); }
+  .role-badge.operator{ background:#4d8fe030; color:var(--blue); }
+  .who button{
+    background:transparent; border:1px solid var(--line); color:var(--dim); padding:6px 12px;
+    border-radius:6px; cursor:pointer; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px;
+  }
+  .who button:hover{ color:var(--text); border-color:var(--red); }
+
+  .tabs{ display:flex; gap:2px; padding:0 26px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .tab{ padding:12px 18px; font-size:13.5px; color:var(--dim); cursor:pointer; border-bottom:2px solid transparent; }
+  .tab.active{ color:var(--text); border-bottom-color:var(--blue); }
+  .tab.admin-tab{ color:var(--purple); }
+
+  .view{ display:none; padding:26px; max-width:1180px; margin:0 auto; }
+  .view.active{ display:block; }
+
+  .grid3{ display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:18px; }
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:20px; }
+  .panel h3{ margin:0 0 14px 0; font-size:13.5px; font-family:'IBM Plex Mono',monospace; color:var(--dim); font-weight:500; }
+  .chart-wrap{ height:220px; display:flex; align-items:center; justify-content:center; }
+
+  .device-list{ display:flex; flex-direction:column; gap:10px; margin-top:16px; }
+  .device-row{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px;
+    display:flex; align-items:center; justify-content:space-between; cursor:pointer; text-decoration:none;
+  }
+  .device-row:hover{ border-color:var(--blue); }
+  .device-head-left{ display:flex; align-items:center; gap:12px; }
+  .dot{ width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .dot.on{ background:var(--green); } .dot.off{ background:var(--red); }
+  .dname{ font-weight:600; font-size:14.5px; color:var(--text); }
+  .dmeta{ font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--mdim); }
+  .sim-badge{ font-size:10px; background:#5b6b7430; color:var(--dim); padding:2px 7px; border-radius:4px; margin-left:8px; }
+  .chevron{ color:var(--mdim); font-size:14px; }
+
+  .btn{ background:var(--blue); border:none; color:#0b1116; font-weight:600; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12.5px; }
+  .btn.red{ background:var(--red); } .btn.grey{ background:var(--line); color:var(--text); }
+  .btn.outline{ background:transparent; border:1px solid var(--line); color:var(--text); }
+  .btn:disabled{ opacity:0.45; cursor:default; }
+
+  .notif-row{ display:flex; gap:12px; padding:12px 16px; border-bottom:1px solid var(--line); align-items:flex-start; }
+  .notif-row:last-child{ border-bottom:none; }
+  .sev{ width:8px; height:8px; border-radius:50%; margin-top:6px; flex-shrink:0; }
+  .sev.info{ background:var(--blue); } .sev.warn{ background:var(--amber); } .sev.crit{ background:var(--red); }
+  .notif-text{ flex:1; font-size:13.5px; }
+  .notif-time{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--mdim); }
+
+  table{ width:100%; border-collapse:collapse; }
+  th{ text-align:left; font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--dim); padding:8px 10px; border-bottom:1px solid var(--line); }
+  td{ padding:10px; border-bottom:1px solid var(--line); font-size:13px; }
+  .create-user-form{ display:grid; grid-template-columns:1fr 1fr 140px 100px; gap:10px; margin-bottom:20px; align-items:end; }
+  .create-user-form label{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--dim); display:block; margin-bottom:5px; }
+  .create-user-form input, .create-user-form select{
+    width:100%; background:#0f1417; border:1px solid var(--line); border-radius:6px; color:var(--text); padding:8px 10px;
+  }
+  .tag{ padding:2px 8px; border-radius:5px; font-size:11px; }
+  .tag.admin{ background:#a682e830; color:var(--purple); } .tag.operator{ background:#4d8fe030; color:var(--blue); }
+  .tag.disabled{ background:#e4574c30; color:var(--red); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>IoT-4G Smart Vehicle — Command Center</h1>
+  <div class="who">
+    <span id="whoEmail">—</span>
+    <span class="role-badge" id="roleBadge">—</span>
+    <button id="signOutBtn">Sign out</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-view="dashboard">Dashboard</div>
+  <div class="tab" data-view="devices">Devices Status</div>
+  <div class="tab" data-view="requests">Requests</div>
+  <div class="tab" data-view="notifications">Notifications</div>
+  <div class="tab" data-view="staffaccounts">Staff Accounts</div>
+  <div class="tab admin-tab" data-view="admin" id="adminTabBtn" style="display:none;">Admin</div>
+</div>
+
+<!-- DASHBOARD -->
+<div class="view active" id="view-dashboard">
+  <div class="panel" style="margin-bottom:18px;">
+    <h3>LIVE FLEET MAP — click a vehicle marker to open its control panel</h3>
+    <svg id="fleetMap" style="width:100%; height:auto; display:block;"></svg>
+  </div>
+  <div class="grid3">
+    <div class="panel">
+      <h3>DEVICE STATUS</h3>
+      <div class="chart-wrap"><canvas id="deviceChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>TASK STATUS</h3>
+      <div class="chart-wrap"><canvas id="taskChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>LINK TYPE</h3>
+      <div class="chart-wrap"><canvas id="linkChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>BATTERY LEVELS</h3>
+      <div class="chart-wrap"><canvas id="batteryChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>ACTIVE CONTROLLER</h3>
+      <div class="chart-wrap"><canvas id="controlChart"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- DEVICES -->
+<div class="view" id="view-devices">
+  <div class="panel">
+    <h3>FLEET (<span id="deviceCount">0</span> devices) — click a device to open its control panel</h3>
+    <div class="device-list" id="deviceList"></div>
+  </div>
+</div>
+
+<!-- REQUESTS -->
+<div class="view" id="view-requests">
+  <div class="panel">
+    <h3>MATERIAL REQUESTS FROM HOSPITAL STAFF</h3>
+    <table>
+      <thead><tr><th>Item</th><th>From</th><th>To</th><th>Requested by</th><th>Status</th><th>Assign</th></tr></thead>
+      <tbody id="requestsTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- NOTIFICATIONS -->
+<div class="view" id="view-notifications">
+  <div class="panel">
+    <h3>NOTIFICATIONS</h3>
+    <div id="notifList"></div>
+  </div>
+</div>
+
+<!-- STAFF ACCOUNTS (operator + admin) -->
+<div class="view" id="view-staffaccounts">
+  <div class="panel">
+    <h3>CREATE HOSPITAL STAFF ACCOUNT</h3>
+    <div class="create-user-form" style="grid-template-columns:1fr 1fr 100px;">
+      <div><label>EMAIL</label><input id="newStaffEmail" placeholder="nurse.wardA@iot4g.local"></div>
+      <div><label>PASSWORD</label><input id="newStaffPassword" type="text" placeholder="min 6 chars"></div>
+      <div><button class="btn" id="createStaffBtn" style="width:100%;">Create</button></div>
+    </div>
+    <div id="createStaffMsg" style="font-family:'IBM Plex Mono',monospace;font-size:12px;margin-bottom:20px;"></div>
+
+    <h3>HOSPITAL STAFF USERS</h3>
+    <table>
+      <thead><tr><th>Email</th><th>Status</th><th></th></tr></thead>
+      <tbody id="staffTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ADMIN -->
+<div class="view" id="view-admin">
+  <div class="panel">
+    <h3>CREATE USER</h3>
+    <div class="create-user-form">
+      <div><label>EMAIL</label><input id="newEmail" placeholder="operator2@iot4g.local"></div>
+      <div><label>PASSWORD</label><input id="newPassword" type="text" placeholder="min 6 chars"></div>
+      <div><label>ROLE</label>
+        <select id="newRole"><option value="operator">Operator</option><option value="admin">Admin</option><option value="staff">Hospital Staff</option></select>
+      </div>
+      <div><button class="btn" id="createUserBtn" style="width:100%;">Create</button></div>
+    </div>
+    <div id="createUserMsg" style="font-family:'IBM Plex Mono',monospace;font-size:12px;margin-bottom:20px;"></div>
+
+    <h3>USERS</h3>
+    <table>
+      <thead><tr><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+      <tbody id="userTableBody"></tbody>
+    </table>
+
+    <h3 style="margin-top:26px;">DEMO FLEET</h3>
+    <button class="btn outline" id="seedBtn">Seed / refresh simulated demo devices</button>
+    <div id="seedMsg" style="font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:10px;"></div>
+  </div>
+</div>
+
+<script>
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCeGwiHATO-1Dg4zY3nrbTzb0GG2h7Sm_A",
+  authDomain: "iot-4g-based-smart-vehicle.firebaseapp.com",
+  databaseURL: "https://iot-4g-based-smart-vehicle-default-rtdb.firebaseio.com",
+  projectId: "iot-4g-based-smart-vehicle",
+  appId: "1:6008451577:web:e9da521ece03e7b0c68d28"
+};
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth();
+const db = firebase.database();
+
+let currentUser = null;
+let myRole = null;
+const REAL_DEVICE_ID = "vehicle-01"; // matches the ESP32 firmware's device id
+
+// ---------------- AUTH GATE ----------------
+auth.onAuthStateChanged(user => {
+  if(!user){ window.location.href = 'index.html'; return; }
+  currentUser = user;
+  db.ref('users/' + user.uid).get().then(snap => {
+    const rec = snap.val();
+    if(!rec || rec.disabled){ auth.signOut(); window.location.href = 'index.html'; return; }
+    if(rec.role === 'staff'){ window.location.href = 'staff-app.html'; return; } // command center is for operator/admin only
+    myRole = rec.role;
+    document.getElementById('whoEmail').textContent = rec.email || user.email;
+    const badge = document.getElementById('roleBadge');
+    badge.textContent = myRole.toUpperCase();
+    badge.className = 'role-badge ' + myRole;
+    if(myRole === 'admin') document.getElementById('adminTabBtn').style.display = 'block';
+    initApp();
+  });
+});
+document.getElementById('signOutBtn').onclick = () => auth.signOut();
+
+// ---------------- TABS ----------------
+document.querySelectorAll('.tab').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('view-' + t.dataset.view).classList.add('active');
+  };
+});
+
+// ---------------- CHARTS ----------------
+let deviceChart, taskChart, linkChart, batteryChart, controlChart;
+function initCharts(){
+  const legendWhite = { plugins:{ legend:{ labels:{ color:'#e7edf0' } } } };
+
+  deviceChart = new Chart(document.getElementById('deviceChart'), { type:'doughnut',
+    data:{ labels:['Online','Offline'], datasets:[{ data:[0,0], backgroundColor:['#33d17a','#e4574c'], borderWidth:0 }] },
+    options: legendWhite });
+
+  taskChart = new Chart(document.getElementById('taskChart'), { type:'doughnut',
+    data:{ labels:['Towards pickup','Towards drop','Idle'], datasets:[{ data:[0,0,0], backgroundColor:['#33d17a','#4d8fe0','#8a6a4a'], borderWidth:0 }] },
+    options: legendWhite });
+
+  linkChart = new Chart(document.getElementById('linkChart'), { type:'doughnut',
+    data:{ labels:['WiFi','SIM (4G)'], datasets:[{ data:[0,0], backgroundColor:['#4d8fe0','#e8a33d'], borderWidth:0 }] },
+    options: legendWhite });
+
+  batteryChart = new Chart(document.getElementById('batteryChart'), { type:'bar',
+    data:{ labels:['0-20%','20-50%','50-80%','80-100%'], datasets:[{ data:[0,0,0,0], backgroundColor:'#33d17a', borderWidth:0 }] },
+    options:{ plugins:{ legend:{ display:false } },
+      scales:{ x:{ ticks:{ color:'#7c8992' }, grid:{ color:'#2a333a' } }, y:{ ticks:{ color:'#7c8992' }, grid:{ color:'#2a333a' }, beginAtZero:true } } } });
+
+  controlChart = new Chart(document.getElementById('controlChart'), { type:'doughnut',
+    data:{ labels:['Operator-controlled','Admin override'], datasets:[{ data:[0,0], backgroundColor:['#4d8fe0','#a682e8'], borderWidth:0 }] },
+    options: legendWhite });
+}
+
+// ---------------- INIT ----------------
+let latestDevicesCache = {};
+function initApp(){
+  // Each piece is isolated: if one fails (e.g. the Chart.js CDN is
+  // blocked), the rest of the app — buttons, listeners, other tabs —
+  // still works instead of the whole page going unresponsive.
+  try{ initCharts(); } catch(e){ console.error('Chart init failed:', e); }
+  try{ listenDevices(); } catch(e){ console.error('Device listener failed:', e); }
+  try{ listenNotifications(); } catch(e){ console.error('Notifications listener failed:', e); }
+  try{ listenRequests(); } catch(e){ console.error('Requests listener failed:', e); }
+  try{ listenStaffUsers(); } catch(e){ console.error('Staff users listener failed:', e); }
+  if(myRole === 'admin'){
+    try{ listenUsers(); } catch(e){ console.error('User listener failed:', e); }
+    const seedBtn = document.getElementById('seedBtn');
+    if(seedBtn) seedBtn.onclick = seedDemoFleet;
+  }
+  const createBtn = document.getElementById('createUserBtn');
+  if(createBtn) createBtn.onclick = createUser;
+  const createStaffBtn = document.getElementById('createStaffBtn');
+  if(createStaffBtn) createStaffBtn.onclick = createStaffUser;
+
+  // Desktop notification when a new request comes in, for as long as this
+  // tab stays open — no backend/push-service needed for this to work.
+  if(window.Notification && Notification.permission === 'default'){
+    Notification.requestPermission();
+  }
+}
+
+// ---------------- DEVICES ----------------
+function listenDevices(){
+  db.ref('devices').on('value', snap => {
+    const devices = snap.val() || {};
+    latestDevicesCache = devices;
+    renderCharts(devices);
+    renderDeviceList(devices);
+  });
+}
+
+function renderCharts(devices){
+  if(!deviceChart || !taskChart) return; // charts never initialized (e.g. CDN blocked) — skip safely
+  let online = 0, offline = 0, pick = 0, drop = 0, idle = 0;
+  let wifi = 0, lte = 0;
+  const batteryBuckets = [0,0,0,0]; // 0-20, 20-50, 50-80, 80-100
+  let operatorControlled = 0, adminControlled = 0;
+
+  Object.values(devices).forEach(d => {
+    if(isDeviceOnline(d.status)) online++; else offline++;
+    const task = (d.telemetry && d.telemetry.task) || 'idle';
+    if(task === 'toPickup') pick++; else if(task === 'toDrop') drop++; else idle++;
+
+    const link = d.status && d.status.link;
+    if(link === 'wifi') wifi++; else if(link === 'lte') lte++;
+
+    const battery = d.telemetry && d.telemetry.battery;
+    if(typeof battery === 'number'){
+      if(battery < 20) batteryBuckets[0]++;
+      else if(battery < 50) batteryBuckets[1]++;
+      else if(battery < 80) batteryBuckets[2]++;
+      else batteryBuckets[3]++;
+    }
+
+    const activeSource = (d.control && d.control.activeSource) || 'operator';
+    if(activeSource === 'admin') adminControlled++; else operatorControlled++;
+  });
+
+  deviceChart.data.datasets[0].data = [online, offline]; deviceChart.update();
+  taskChart.data.datasets[0].data = [pick, drop, idle]; taskChart.update();
+  if(linkChart){ linkChart.data.datasets[0].data = [wifi, lte]; linkChart.update(); }
+  if(batteryChart){ batteryChart.data.datasets[0].data = batteryBuckets; batteryChart.update(); }
+  if(controlChart){ controlChart.data.datasets[0].data = [operatorControlled, adminControlled]; controlChart.update(); }
+
+  renderFleetMap(devices);
+}
+
+function renderFleetMap(devices){
+  const svg = document.getElementById('fleetMap');
+  if(!svg || typeof renderFloorPlan !== 'function') return;
+  const markerDevices = Object.entries(devices)
+    .filter(([id, d]) => d.telemetry && typeof d.telemetry.mapX === 'number' && typeof d.telemetry.mapY === 'number')
+    .map(([id, d]) => ({ id, x: d.telemetry.mapX, y: d.telemetry.mapY, online: isDeviceOnline(d.status), shortLabel: id }));
+  renderFloorPlan(svg, {
+    devices: markerDevices,
+    onMarkerClick: (id) => { window.location.href = 'device-detail.html?id=' + encodeURIComponent(id); }
+  });
+}
+
+function renderDeviceList(devices){
+  const list = document.getElementById('deviceList');
+  const ids = Object.keys(devices);
+  document.getElementById('deviceCount').textContent = ids.length;
+  list.innerHTML = '';
+  ids.forEach(id => {
+    const d = devices[id];
+    const online = isDeviceOnline(d.status);
+    const link = (d.status && d.status.link) || '—';
+    const row = document.createElement('a');
+    row.className = 'device-row';
+    row.href = 'device-detail.html?id=' + encodeURIComponent(id);
+    row.innerHTML = `
+      <div class="device-head-left">
+        <span class="dot ${online ? 'on' : 'off'}"></span>
+        <span class="dname">${escHtml(id)}${id !== REAL_DEVICE_ID ? '<span class="sim-badge">simulated</span>' : ''}</span>
+        <span class="dmeta">${online ? 'ONLINE' : 'OFFLINE'} · ${escHtml(link.toUpperCase())}</span>
+      </div>
+      <span class="chevron">›</span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+// XSS fix: escape user-controlled strings before inserting into innerHTML
+function escHtml(str){ return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ---------------- NOTIFICATIONS ----------------
+function listenNotifications(){
+  db.ref('notifications').limitToLast(50).on('value', snap => {
+    const items = Object.values(snap.val() || {}).sort((a,b) => b.ts - a.ts);
+    const list = document.getElementById('notifList');
+    list.innerHTML = items.length ? items.map(n => `
+      <div class="notif-row">
+        <span class="sev ${escHtml(n.severity || 'info')}"></span>
+        <span class="notif-text">${escHtml(n.message)}</span>
+        <span class="notif-time">${new Date(n.ts).toLocaleString()}</span>
+      </div>`).join('') : '<div style="color:#7c8992;padding:10px;">No notifications yet.</div>';
+  });
+}
+
+// ---------------- REQUESTS (from hospital staff) ----------------
+let requestsFirstLoadTimer = true;
+function roomLabelFor(id){
+  const r = (typeof roomById === 'function') ? roomById(id) : null;
+  return r ? r.label : (id || '—');
+}
+
+function listenRequests(){
+  const ref = db.ref('requests').limitToLast(100);
+  ref.on('value', snap => renderRequestsTable(snap.val() || {}));
+  ref.on('child_added', snap => {
+    if(requestsFirstLoadTimer) return; // skip the initial burst of existing requests on page load
+    const r = snap.val();
+    if(r && r.status === 'pending') notifyNewRequest(r);
+  });
+  setTimeout(() => { requestsFirstLoadTimer = false; }, 1500);
+}
+
+function notifyNewRequest(r){
+  const text = `New request: ${r.item} — ${roomLabelFor(r.fromRoom)} → ${roomLabelFor(r.toRoom)} (by ${r.requestedBy})`;
+  if(window.Notification && Notification.permission === 'granted'){
+    new Notification('New material request', { body: text });
+  }
+  db.ref('notifications').push({ message: text, severity:'info', ts: Date.now() });
+}
+
+function renderRequestsTable(reqs){
+  const body = document.getElementById('requestsTableBody');
+  if(!body) return;
+  const entries = Object.entries(reqs).sort((a,b) => (b[1].ts||0) - (a[1].ts||0));
+  const onlineOptions = Object.entries(latestDevicesCache)
+    .filter(([id,d]) => isDeviceOnline(d.status))
+    .map(([id]) => `<option value="${id}">${id}</option>`).join('') || '<option value="">No online devices</option>';
+
+  body.innerHTML = entries.length ? entries.map(([id, r]) => {
+    const assignCell = r.status === 'pending'
+      ? `<select id="assignDevice-${id}">${onlineOptions}</select> <button class="btn" data-assign="${id}">Assign</button>`
+      : `<span class="tag admin">${r.assignedDeviceId || '—'}</span>`;
+    return `<tr>
+      <td>${escHtml(r.item)}</td><td>${escHtml(roomLabelFor(r.fromRoom))}</td><td>${escHtml(roomLabelFor(r.toRoom))}</td>
+      <td>${escHtml(r.requestedBy)}</td>
+      <td><span class="tag ${r.status === 'pending' ? 'operator' : 'admin'}">${escHtml(r.status)}</span></td>
+      <td>${assignCell}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" style="color:#7c8992;">No requests yet.</td></tr>';
+
+  body.querySelectorAll('button[data-assign]').forEach(btn => {
+    btn.onclick = () => {
+      const reqId = btn.dataset.assign;
+      const deviceId = document.getElementById('assignDevice-' + reqId).value;
+      if(!deviceId) return;
+      assignRequest(reqId, deviceId);
+    };
+  });
+}
+
+function assignRequest(reqId, deviceId){
+  db.ref('requests/' + reqId).once('value').then(snap => {
+    const r = snap.val();
+    if(!r) return;
+    const node = myRole === 'admin' ? 'admin' : 'operator';
+    const updates = {};
+    updates['requests/' + reqId + '/status'] = 'assigned';
+    updates['requests/' + reqId + '/assignedDeviceId'] = deviceId;
+    updates['requests/' + reqId + '/assignedBy'] = currentUser.email;
+    updates['requests/' + reqId + '/assignedAt'] = Date.now();
+    // Also pushes the route straight to the vehicle, so assigning a request
+    // and sending the route to the vehicle is one action, not two.
+    updates[`devices/${deviceId}/control/${node}/pickup`] = r.fromRoom;
+    updates[`devices/${deviceId}/control/${node}/destination`] = r.toRoom;
+    updates[`devices/${deviceId}/control/${node}/issuedBy`] = currentUser.email;
+    updates[`devices/${deviceId}/control/${node}/ts`] = Date.now();
+    if(myRole === 'admin') updates[`devices/${deviceId}/control/activeSource`] = 'admin';
+    db.ref().update(updates);
+  });
+}
+
+// ---------------- STAFF ACCOUNTS (operator + admin can both do this) ----------------
+function listenStaffUsers(){
+  db.ref('users').on('value', snap => {
+    const users = snap.val() || {};
+    const body = document.getElementById('staffTableBody');
+    if(!body) return;
+    const staffEntries = Object.entries(users).filter(([uid, u]) => u.role === 'staff');
+    body.innerHTML = staffEntries.length ? staffEntries.map(([uid, u]) => `
+      <tr>
+        <td>${u.email}</td>
+        <td>${u.disabled ? '<span class="tag disabled">disabled</span>' : 'active'}</td>
+        <td><button class="btn ${u.disabled ? '' : 'red'}" data-uid="${uid}" data-disabled="${!!u.disabled}">${u.disabled ? 'Enable' : 'Disable'}</button></td>
+      </tr>`).join('') : '<tr><td colspan="3" style="color:#7c8992;">No staff accounts yet.</td></tr>';
+    body.querySelectorAll('button[data-uid]').forEach(btn => {
+      btn.onclick = () => db.ref('users/' + btn.dataset.uid + '/disabled').set(btn.dataset.disabled === 'false');
+    });
+  });
+}
+
+function createStaffUser(){
+  const email = document.getElementById('newStaffEmail').value.trim();
+  const password = document.getElementById('newStaffPassword').value;
+  const msgEl = document.getElementById('createStaffMsg');
+  if(!email || password.length < 6){ msgEl.textContent = 'Enter an email and a password of at least 6 characters.'; return; }
+
+  const secondary = firebase.apps.find(a => a.name === 'Secondary') || firebase.initializeApp(FIREBASE_CONFIG, 'Secondary');
+  secondary.auth().createUserWithEmailAndPassword(email, password)
+    .then(cred => db.ref('users/' + cred.user.uid).set({ email, role:'staff', disabled:false, createdBy: currentUser.email, createdAt: Date.now() })
+      .then(() => secondary.auth().signOut()))
+    .then(() => { msgEl.textContent = 'Staff account created.'; document.getElementById('newStaffEmail').value=''; document.getElementById('newStaffPassword').value=''; })
+    .catch(err => { msgEl.textContent = err.message; });
+}
+
+// ---------------- ADMIN: USERS ----------------
+function listenUsers(){
+  db.ref('users').on('value', snap => {
+    const users = snap.val() || {};
+    const body = document.getElementById('userTableBody');
+    body.innerHTML = Object.entries(users).map(([uid, u]) => `
+      <tr>
+        <td>${u.email}</td>
+        <td><span class="tag ${u.role}">${u.role}</span></td>
+        <td>${u.disabled ? '<span class="tag disabled">disabled</span>' : 'active'}</td>
+        <td>${uid !== currentUser.uid ? `<button class="btn ${u.disabled ? '' : 'red'}" data-uid="${uid}" data-disabled="${!!u.disabled}">${u.disabled ? 'Enable' : 'Disable'}</button>` : ''}</td>
+      </tr>`).join('');
+    body.querySelectorAll('button[data-uid]').forEach(btn => {
+      btn.onclick = () => db.ref('users/' + btn.dataset.uid + '/disabled').set(btn.dataset.disabled === 'false');
+    });
+  });
+}
+
+// Secondary Firebase app instance so creating a user doesn't sign the admin out
+function createUser(){
+  const email = document.getElementById('newEmail').value.trim();
+  const password = document.getElementById('newPassword').value;
+  const role = document.getElementById('newRole').value;
+  const msgEl = document.getElementById('createUserMsg');
+  if(!email || password.length < 6){ msgEl.textContent = 'Enter an email and a password of at least 6 characters.'; return; }
+
+  const secondary = firebase.apps.find(a => a.name === 'Secondary') || firebase.initializeApp(FIREBASE_CONFIG, 'Secondary');
+  secondary.auth().createUserWithEmailAndPassword(email, password)
+    .then(cred => db.ref('users/' + cred.user.uid).set({ email, role, disabled:false, createdBy: currentUser.email, createdAt: Date.now() })
+      .then(() => secondary.auth().signOut()))
+    .then(() => { msgEl.textContent = 'User created.'; document.getElementById('newEmail').value=''; document.getElementById('newPassword').value=''; })
+    .catch(err => { msgEl.textContent = err.message; });
+}
+
+// ---------------- DEMO FLEET SEEDING ----------------
+function seedDemoFleet(){
+  const tasks = ['toPickup','toDrop','idle'];
+  const updates = {};
+  for(let i = 1; i <= 9; i++){
+    const id = 'demo-' + i;
+    const online = Math.random() > 0.3;
+    updates['devices/' + id + '/status'] = { online, link: Math.random() > 0.5 ? 'wifi' : 'lte', lastSeen: Date.now() };
+    updates['devices/' + id + '/telemetry'] = {
+      speed: Math.floor(Math.random()*20), battery: Math.floor(50+Math.random()*50),
+      signal4g: Math.floor(40+Math.random()*60), signalWifi: Math.floor(40+Math.random()*60),
+      mapX: Math.floor(40 + Math.random()*1160), mapY: Math.floor(40 + Math.random()*820),
+      lat: 19.07 + Math.random()*0.05, lng: 72.87 + Math.random()*0.05,
+      task: tasks[Math.floor(Math.random()*tasks.length)]
+    };
+  }
+  const btn = document.getElementById('seedBtn');
+  const msgEl = document.getElementById('seedMsg');
+  btn.disabled = true;
+  msgEl.style.color = 'var(--dim)';
+  msgEl.textContent = 'Seeding…';
+  db.ref().update(updates)
+    .then(() => {
+      msgEl.style.color = 'var(--green)';
+      msgEl.textContent = '9 demo devices seeded/updated successfully.';
+    })
+    .catch(err => {
+      msgEl.style.color = 'var(--red)';
+      msgEl.textContent = 'Failed: ' + err.message;
+    })
+    .finally(() => { btn.disabled = false; });
+}
+</script>
+</body>
+</html>

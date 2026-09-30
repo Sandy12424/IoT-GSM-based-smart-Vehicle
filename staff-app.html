@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hospital Staff — Material Request</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="floor-plan.js"></script>
+<style>
+  :root{
+    --bg:#0f1417; --panel:#171e23; --panel2:#1c252b; --line:#2a333a;
+    --text:#e7edf0; --dim:#7c8992; --mdim:#5b6b74;
+    --green:#33d17a; --amber:#e8a33d; --red:#e4574c; --blue:#4d8fe0;
+  }
+  *{box-sizing:border-box;}
+  html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+  body{
+    margin:0; background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+    max-width:520px; margin-left:auto; margin-right:auto;
+  }
+  .topbar{
+    position:sticky; top:0; padding:calc(14px + env(safe-area-inset-top,0px)) 18px 14px;
+    background:var(--panel); border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; z-index:5;
+  }
+  .topbar h1{ font-size:15px; margin:0; font-weight:600; }
+  .topbar button{ background:transparent; border:1px solid var(--line); color:var(--dim); padding:6px 12px; border-radius:6px; font-size:12px; }
+
+  .wrap{ padding:18px; }
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:18px; }
+  .panel h2{ font-size:13px; font-family:'IBM Plex Mono',monospace; color:var(--dim); margin:0 0 14px 0; font-weight:500; }
+
+  label{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--dim); display:block; margin-bottom:6px; }
+  .field{ margin-bottom:14px; }
+  input, select{
+    width:100%; background:#0f1417; border:1px solid var(--line); border-radius:8px; color:var(--text);
+    padding:12px 13px; font-size:15px; font-family:'IBM Plex Sans',sans-serif;
+  }
+  input:focus, select:focus{ outline:none; border-color:var(--blue); }
+
+  button.primary{
+    width:100%; background:var(--blue); border:none; color:#0b1116; font-weight:600;
+    padding:14px; border-radius:8px; font-size:15px; cursor:pointer;
+  }
+  button.primary:disabled{ opacity:0.5; }
+  .formmsg{ font-family:'IBM Plex Mono',monospace; font-size:12.5px; margin-top:12px; min-height:16px; }
+  .formmsg.ok{ color:var(--green); } .formmsg.error{ color:var(--red); }
+
+  .req-card{ background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:10px; }
+  .req-card .item{ font-weight:600; font-size:14.5px; margin-bottom:4px; }
+  .req-card .route{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--dim); margin-bottom:8px; }
+  .req-card .meta{ display:flex; justify-content:space-between; align-items:center; }
+  .status-pill{ font-size:11px; padding:3px 10px; border-radius:12px; font-weight:600; }
+  .status-pill.pending{ background:#e8a33d30; color:var(--amber); }
+  .status-pill.assigned{ background:#4d8fe030; color:var(--blue); }
+  .status-pill.completed{ background:#33d17a30; color:var(--green); }
+  .req-time{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--mdim); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Material Request</h1>
+  <button id="signOutBtn">Sign out</button>
+</div>
+
+<div class="wrap">
+  <div class="panel">
+    <h2>NEW REQUEST</h2>
+    <div class="field"><label>ITEM / MATERIAL NEEDED</label><input id="item" placeholder="e.g. IV fluids, bandages, medicine tray"></div>
+    <div class="field"><label>FROM ROOM</label><select id="fromRoom"></select></div>
+    <div class="field"><label>TO ROOM</label><select id="toRoom"></select></div>
+    <button class="primary" id="submitBtn">Send Request</button>
+    <div class="formmsg" id="formMsg"></div>
+  </div>
+
+  <div class="panel">
+    <h2>MY REQUESTS</h2>
+    <div id="myRequests"><div style="color:var(--mdim);font-size:13px;">No requests yet.</div></div>
+  </div>
+</div>
+
+<script>
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCeGwiHATO-1Dg4zY3nrbTzb0GG2h7Sm_A",
+  authDomain: "iot-4g-based-smart-vehicle.firebaseapp.com",
+  databaseURL: "https://iot-4g-based-smart-vehicle-default-rtdb.firebaseio.com",
+  projectId: "iot-4g-based-smart-vehicle",
+  appId: "1:6008451577:web:e9da521ece03e7b0c68d28"
+};
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth();
+const db = firebase.database();
+let currentUser = null;
+
+auth.onAuthStateChanged(user => {
+  if(!user){ window.location.href = 'index.html'; return; }
+  currentUser = user;
+  db.ref('users/' + user.uid).get().then(snap => {
+    const rec = snap.val();
+    if(!rec || rec.disabled){ auth.signOut(); window.location.href = 'index.html'; return; }
+    if(rec.role !== 'staff'){ window.location.href = 'dashboard.html'; return; } // operators/admins belong on the command center
+    initStaffApp();
+  });
+});
+document.getElementById('signOutBtn').onclick = () => auth.signOut();
+
+function initStaffApp(){
+  populateRoomSelect(document.getElementById('fromRoom'));
+  populateRoomSelect(document.getElementById('toRoom'));
+
+  document.getElementById('submitBtn').onclick = submitRequest;
+  listenMyRequests();
+}
+
+function submitRequest(){
+  const item = document.getElementById('item').value.trim();
+  const fromRoom = document.getElementById('fromRoom').value;
+  const toRoom = document.getElementById('toRoom').value;
+  const msgEl = document.getElementById('formMsg');
+  const btn = document.getElementById('submitBtn');
+
+  if(!item || !fromRoom || !toRoom){ msgEl.className = 'formmsg error'; msgEl.textContent = 'Fill in the item and both rooms.'; return; }
+  if(fromRoom === toRoom){ msgEl.className = 'formmsg error'; msgEl.textContent = 'Pickup and destination can\'t be the same room.'; return; }
+
+  btn.disabled = true;
+  db.ref('requests').push({
+    item, fromRoom, toRoom,
+    requestedBy: currentUser.email,
+    requestedByUid: currentUser.uid,
+    status: 'pending',
+    ts: Date.now()
+  }).then(() => {
+    msgEl.className = 'formmsg ok';
+    msgEl.textContent = 'Request sent to command center.';
+    document.getElementById('item').value = '';
+    document.getElementById('fromRoom').value = '';
+    document.getElementById('toRoom').value = '';
+  }).catch(err => {
+    msgEl.className = 'formmsg error';
+    msgEl.textContent = err.message;
+  }).finally(() => { btn.disabled = false; });
+}
+
+// XSS fix: escape user-controlled strings before inserting into innerHTML
+function escHtml(str){ return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function listenMyRequests(){
+  db.ref('requests').orderByChild('requestedByUid').equalTo(currentUser.uid).on('value', snap => {
+    const items = Object.values(snap.val() || {}).sort((a,b) => b.ts - a.ts);
+    const wrap = document.getElementById('myRequests');
+    wrap.innerHTML = items.length ? items.map(r => `
+      <div class="req-card">
+        <div class="item">${escHtml(r.item)}</div>
+        <div class="route">${escHtml(roomById(r.fromRoom) ? roomById(r.fromRoom).label : r.fromRoom)} → ${escHtml(roomById(r.toRoom) ? roomById(r.toRoom).label : r.toRoom)}</div>
+        <div class="meta">
+          <span class="status-pill ${escHtml(r.status)}">${escHtml(r.status)}</span>
+          <span class="req-time">${new Date(r.ts).toLocaleString()}</span>
+        </div>
+      </div>`).join('') : '<div style="color:var(--mdim);font-size:13px;">No requests yet.</div>';
+  });
+}
+</script>
+</body>
+</html>
